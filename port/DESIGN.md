@@ -106,7 +106,10 @@ rule per pattern (below), applied mechanically everywhere it occurs, each replac
 10. **sp/pc legality:** T32 reads sp as rn only in add/sub/cmp/cmn, writes it only from add/sub (rn == sp) and
     mov (register), reads it as rm only in mov; AddrMode1 routes every other use through a scratch (rd when free).
     ldm/stm: ia/db, >= 2 registers, no sp, no pc+lr in loads, no pc in stores; anything else (and single-register
-    push/pop) becomes ldr/str with the same layout.
+    push/pop) becomes ldr/str with the same layout. pc is never stored: `str pc` is UNPREDICTABLE in T32 (Tegra's
+    Cortex-A9/A15 store it, Qualcomm Krait / Cortex-A7 trap it = the v1.3 crash on the Lumia 2520 / 735), so pc's slot
+    gets lr (only DeoptimizationEntry stores pc, and the deoptimizer takes the return address from lr) and AddrMode2
+    CHECKs that no store has rd == pc.
 11. **svc** (simulator only: redirections, stops) = `udf.w #imm16` with bit 15 = stop flag, 14:0 = code.
 12. **ARMv7 baseline**: ProbeImpl sets kArmv7 (= ARMv7 + VFPv3-D32 + NEON aliases) also for the snapshot.
 13. **Interworking (recommended by the map, to verify + implement next): ALL-ODD** - every stored code entry and

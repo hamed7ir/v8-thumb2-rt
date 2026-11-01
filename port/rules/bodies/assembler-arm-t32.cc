@@ -417,6 +417,9 @@ void Assembler::AddrMode2(Instr instr, Register rd, const MemOperand& x) {
   // used instead.
   DCHECK(x.rn_ != pc);
   bool is_load = (instr & L) != 0;
+  // T32 stores of pc are UNPREDICTABLE: Tegra (Cortex-A9/A15) stores the value,
+  // Qualcomm Krait / Cortex-A7 trap it as an illegal instruction.
+  CHECK(is_load || rd != pc);
   uint32_t t3 = (instr & B) != 0 ? (is_load ? t32::kLdrb : t32::kStrb)
                                  : (is_load ? t32::kLdr : t32::kStr);
   LoadStoreT32(t3, rd, x, Instruction::ConditionField(instr));
@@ -524,6 +527,11 @@ void Assembler::AddrMode4(Instr instr, Register rn, RegList rl) {
       rn_offset = offset;  // loaded after the others that use rn
     } else if (is_load) {
       ldr(r, MemOperand(rn, offset), cond);
+    } else if (r == pc) {
+      // pc cannot be stored in T32 (see AddrMode2). Its slot only keeps the
+      // layout (DeoptimizationEntry: the deoptimizer takes the return address
+      // from lr), so it gets lr's value.
+      str(lr, MemOperand(rn, offset), cond);
     } else {
       str(r, MemOperand(rn, offset), cond);
     }

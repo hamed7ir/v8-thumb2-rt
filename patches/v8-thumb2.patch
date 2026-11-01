@@ -3,7 +3,7 @@ For V8 15.0.245.28 (Chromium 150.0.7871.226, v8 revision 17700469f857c3aaf7e2803
 From the V8 root:      git -c core.autocrlf=false apply v8-thumb2.patch
 From a Chromium src:   git -c core.autocrlf=false apply --directory=v8 v8-thumb2.patch
 This file is the result of the rules in port/rules applied by port/tools/t2run.py (decisions in port/DESIGN.md), byte
-for byte the V8 tree of the Venetium v1.3 Thumb-2 build. 41 files (one new: src/codegen/arm/t32-encodings-arm.h).
+for byte the V8 tree of the Venetium v1.3.1 Thumb-2 build. 41 files (one new: src/codegen/arm/t32-encodings-arm.h).
 
 diff --git a/src/api/api.cc b/src/api/api.cc
 index 92690e5..eb9ecac 100644
@@ -222,7 +222,7 @@ index 7db421e..e68b146 100644
      branch->SetBranchOffset(branch_offset, jit_allocation);
      if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
 diff --git a/src/codegen/arm/assembler-arm.cc b/src/codegen/arm/assembler-arm.cc
-index 690981b..f6504a2 100644
+index 690981b..9edce52 100644
 --- a/src/codegen/arm/assembler-arm.cc
 +++ b/src/codegen/arm/assembler-arm.cc
 @@ -216,6 +216,9 @@ bool CpuFeatures::SupportsSimd128() {
@@ -928,7 +928,7 @@ index 690981b..f6504a2 100644
    }
  }
  
-@@ -1242,151 +936,320 @@ void Assembler::AddrMode1(Instr instr, Register rd, Register rn,
+@@ -1242,151 +936,323 @@ void Assembler::AddrMode1(Instr instr, Register rd, Register rn,
    CheckBuffer();
    uint32_t opcode = instr & kOpCodeMask;
    bool set_flags = (instr & S) != 0;
@@ -1362,13 +1362,16 @@ index 690981b..f6504a2 100644
 +  // used instead.
 +  DCHECK(x.rn_ != pc);
 +  bool is_load = (instr & L) != 0;
++  // T32 stores of pc are UNPREDICTABLE: Tegra (Cortex-A9/A15) stores the value,
++  // Qualcomm Krait / Cortex-A7 trap it as an illegal instruction.
++  CHECK(is_load || rd != pc);
 +  uint32_t t3 = (instr & B) != 0 ? (is_load ? t32::kLdrb : t32::kStrb)
 +                                 : (is_load ? t32::kLdr : t32::kStr);
 +  LoadStoreT32(t3, rd, x, Instruction::ConditionField(instr));
  }
  
  void Assembler::AddrMode3(Instr instr, Register rd, const MemOperand& x) {
-@@ -1395,55 +1258,120 @@ void Assembler::AddrMode3(Instr instr, Register rd, const MemOperand& x) {
+@@ -1395,55 +1261,125 @@ void Assembler::AddrMode3(Instr instr, Register rd, const MemOperand& x) {
    // This method does not handle pc-relative addresses. ldr_pcrel() should be
    // used instead.
    DCHECK(x.rn_ != pc);
@@ -1507,6 +1510,11 @@ index 690981b..f6504a2 100644
 +      rn_offset = offset;  // loaded after the others that use rn
 +    } else if (is_load) {
 +      ldr(r, MemOperand(rn, offset), cond);
++    } else if (r == pc) {
++      // pc cannot be stored in T32 (see AddrMode2). Its slot only keeps the
++      // layout (DeoptimizationEntry: the deoptimizer takes the return address
++      // from lr), so it gets lr's value.
++      str(lr, MemOperand(rn, offset), cond);
 +    } else {
 +      str(r, MemOperand(rn, offset), cond);
 +    }
@@ -1528,7 +1536,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::AddrMode5(Instr instr, CRegister crd, const MemOperand& x) {
-@@ -1466,7 +1394,10 @@ void Assembler::AddrMode5(Instr instr, CRegister crd, const MemOperand& x) {
+@@ -1466,7 +1402,10 @@ void Assembler::AddrMode5(Instr instr, CRegister crd, const MemOperand& x) {
    if ((am & P) == 0) am |= W;
  
    DCHECK_GE(offset_8, 0);  // no masking needed
@@ -1540,7 +1548,7 @@ index 690981b..f6504a2 100644
  }
  
  int Assembler::branch_offset(Label* L) {
-@@ -1489,17 +1420,20 @@ int Assembler::branch_offset(Label* L) {
+@@ -1489,17 +1428,20 @@ int Assembler::branch_offset(Label* L) {
  
  // Branch instructions.
  void Assembler::b(int branch_offset, Condition cond, RelocInfo::Mode rmode) {
@@ -1566,7 +1574,7 @@ index 690981b..f6504a2 100644
  
    if (cond == al) {
      // Dead code is a good location to emit the constant pool.
-@@ -1508,41 +1442,30 @@ void Assembler::b(int branch_offset, Condition cond, RelocInfo::Mode rmode) {
+@@ -1508,41 +1450,30 @@ void Assembler::b(int branch_offset, Condition cond, RelocInfo::Mode rmode) {
  }
  
  void Assembler::bl(int branch_offset, Condition cond, RelocInfo::Mode rmode) {
@@ -1617,7 +1625,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::b(Label* L, Condition cond) {
-@@ -1552,12 +1475,9 @@ void Assembler::b(Label* L, Condition cond) {
+@@ -1552,12 +1483,9 @@ void Assembler::b(Label* L, Condition cond) {
  
  void Assembler::bl(Label* L, Condition cond) {
    CheckBuffer();
@@ -1633,7 +1641,7 @@ index 690981b..f6504a2 100644
  }
  
  // Data-processing instructions.
-@@ -1617,11 +1537,6 @@ void Assembler::sbc(Register dst, Register src1, const Operand& src2, SBit s,
+@@ -1617,11 +1545,6 @@ void Assembler::sbc(Register dst, Register src1, const Operand& src2, SBit s,
    AddrMode1(cond | SBC | s, dst, src1, src2);
  }
  
@@ -1645,7 +1653,7 @@ index 690981b..f6504a2 100644
  void Assembler::tst(Register src1, const Operand& src2, Condition cond) {
    AddrMode1(cond | TST | S, no_reg, src1, src2);
  }
-@@ -1642,12 +1557,6 @@ void Assembler::cmp(Register src1, Register src2, Condition cond) {
+@@ -1642,12 +1565,6 @@ void Assembler::cmp(Register src1, Register src2, Condition cond) {
    cmp(src1, Operand(src2), cond);
  }
  
@@ -1658,7 +1666,7 @@ index 690981b..f6504a2 100644
  void Assembler::cmn(Register src1, const Operand& src2, Condition cond) {
    AddrMode1(cond | CMN | S, no_reg, src1, src2);
  }
-@@ -1675,51 +1584,37 @@ void Assembler::mov(Register dst, Register src, SBit s, Condition cond) {
+@@ -1675,51 +1592,37 @@ void Assembler::mov(Register dst, Register src, SBit s, Condition cond) {
  
  void Assembler::mov_label_offset(Register dst, Label* label) {
    if (label->is_bound()) {
@@ -1723,7 +1731,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::bic(Register dst, Register src1, const Operand& src2, SBit s,
-@@ -1762,92 +1657,109 @@ void Assembler::lsr(Register dst, Register src1, const Operand& src2, SBit s,
+@@ -1762,92 +1665,109 @@ void Assembler::lsr(Register dst, Register src1, const Operand& src2, SBit s,
  void Assembler::mla(Register dst, Register src1, Register src2, Register srcA,
                      SBit s, Condition cond) {
    DCHECK(dst != pc && src1 != pc && src2 != pc && srcA != pc);
@@ -1857,7 +1865,7 @@ index 690981b..f6504a2 100644
  }
  
  // Saturating instructions.
-@@ -1859,14 +1771,11 @@ void Assembler::usat(Register dst, int satpos, const Operand& src,
+@@ -1859,14 +1779,11 @@ void Assembler::usat(Register dst, int satpos, const Operand& src,
    DCHECK((satpos >= 0) && (satpos <= 31));
    DCHECK(src.IsImmediateShiftedRegister());
    DCHECK((src.shift_op_ == ASR) || (src.shift_op_ == LSL));
@@ -1877,7 +1885,7 @@ index 690981b..f6504a2 100644
  }
  
  // Bitfield manipulation instructions.
-@@ -1881,8 +1790,8 @@ void Assembler::ubfx(Register dst, Register src, int lsb, int width,
+@@ -1881,8 +1798,8 @@ void Assembler::ubfx(Register dst, Register src, int lsb, int width,
    DCHECK(dst != pc && src != pc);
    DCHECK((lsb >= 0) && (lsb <= 31));
    DCHECK((width >= 1) && (width <= (32 - lsb)));
@@ -1888,7 +1896,7 @@ index 690981b..f6504a2 100644
  }
  
  // Signed bit field extract.
-@@ -1896,8 +1805,8 @@ void Assembler::sbfx(Register dst, Register src, int lsb, int width,
+@@ -1896,8 +1813,8 @@ void Assembler::sbfx(Register dst, Register src, int lsb, int width,
    DCHECK(dst != pc && src != pc);
    DCHECK((lsb >= 0) && (lsb <= 31));
    DCHECK((width >= 1) && (width <= (32 - lsb)));
@@ -1899,7 +1907,7 @@ index 690981b..f6504a2 100644
  }
  
  // Bit field clear.
-@@ -1909,8 +1818,8 @@ void Assembler::bfc(Register dst, int lsb, int width, Condition cond) {
+@@ -1909,8 +1826,8 @@ void Assembler::bfc(Register dst, int lsb, int width, Condition cond) {
    DCHECK(dst != pc);
    DCHECK((lsb >= 0) && (lsb <= 31));
    DCHECK((width >= 1) && (width <= (32 - lsb)));
@@ -1910,7 +1918,7 @@ index 690981b..f6504a2 100644
  }
  
  // Bit field insert.
-@@ -1923,31 +1832,25 @@ void Assembler::bfi(Register dst, Register src, int lsb, int width,
+@@ -1923,31 +1840,25 @@ void Assembler::bfi(Register dst, Register src, int lsb, int width,
    DCHECK(dst != pc && src != pc);
    DCHECK((lsb >= 0) && (lsb <= 31));
    DCHECK((width >= 1) && (width <= (32 - lsb)));
@@ -1947,7 +1955,7 @@ index 690981b..f6504a2 100644
    DCHECK(dst != pc);
    DCHECK(src1 != pc);
    DCHECK(src2.IsImmediateShiftedRegister());
-@@ -1955,165 +1858,129 @@ void Assembler::pkhtb(Register dst, Register src1, const Operand& src2,
+@@ -1955,165 +1866,129 @@ void Assembler::pkhtb(Register dst, Register src1, const Operand& src2,
    DCHECK((src2.shift_imm_ >= 1) && (src2.shift_imm_ <= 32));
    DCHECK(src2.shift_op() == ASR);
    int asr = (src2.shift_imm_ == 32) ? 0 : src2.shift_imm_;
@@ -2151,7 +2159,7 @@ index 690981b..f6504a2 100644
  }
  
  // Load/Store instructions.
-@@ -2168,124 +2035,95 @@ void Assembler::strd(Register src1, Register src2, const MemOperand& dst,
+@@ -2168,124 +2043,95 @@ void Assembler::strd(Register src1, Register src2, const MemOperand& dst,
  }
  
  void Assembler::ldr_pcrel(Register dst, int imm12, Condition cond) {
@@ -2297,7 +2305,7 @@ index 690981b..f6504a2 100644
  }
  
  // Load/Store multiple instructions.
-@@ -2340,51 +2178,41 @@ void Assembler::stop(Condition cond, int32_t code) {
+@@ -2340,51 +2186,41 @@ void Assembler::stop(Condition cond, int32_t code) {
  
  void Assembler::bkpt(uint32_t imm16) {
    DCHECK(is_uint16(imm16));
@@ -2366,7 +2374,7 @@ index 690981b..f6504a2 100644
  }
  
  // Coprocessor instructions.
-@@ -2392,7 +2220,8 @@ void Assembler::cdp(Coprocessor coproc, int opcode_1, CRegister crd,
+@@ -2392,7 +2228,8 @@ void Assembler::cdp(Coprocessor coproc, int opcode_1, CRegister crd,
                      CRegister crn, CRegister crm, int opcode_2,
                      Condition cond) {
    DCHECK(is_uint4(opcode_1) && is_uint3(opcode_2));
@@ -2376,7 +2384,7 @@ index 690981b..f6504a2 100644
         crd.code() * B12 | coproc * B8 | (opcode_2 & 7) * B5 | crm.code());
  }
  
-@@ -2405,7 +2234,8 @@ void Assembler::mcr(Coprocessor coproc, int opcode_1, Register rd,
+@@ -2405,7 +2242,8 @@ void Assembler::mcr(Coprocessor coproc, int opcode_1, Register rd,
                      CRegister crn, CRegister crm, int opcode_2,
                      Condition cond) {
    DCHECK(is_uint3(opcode_1) && is_uint3(opcode_2));
@@ -2386,7 +2394,7 @@ index 690981b..f6504a2 100644
         rd.code() * B12 | coproc * B8 | (opcode_2 & 7) * B5 | B4 | crm.code());
  }
  
-@@ -2418,7 +2248,8 @@ void Assembler::mrc(Coprocessor coproc, int opcode_1, Register rd,
+@@ -2418,7 +2256,8 @@ void Assembler::mrc(Coprocessor coproc, int opcode_1, Register rd,
                      CRegister crn, CRegister crm, int opcode_2,
                      Condition cond) {
    DCHECK(is_uint3(opcode_1) && is_uint3(opcode_2));
@@ -2396,7 +2404,7 @@ index 690981b..f6504a2 100644
         rd.code() * B12 | coproc * B8 | (opcode_2 & 7) * B5 | B4 | crm.code());
  }
  
-@@ -2436,7 +2267,8 @@ void Assembler::ldc(Coprocessor coproc, CRegister crd, Register rn, int option,
+@@ -2436,7 +2275,8 @@ void Assembler::ldc(Coprocessor coproc, CRegister crd, Register rn, int option,
                      LFlag l, Condition cond) {
    // Unindexed addressing.
    DCHECK(is_uint8(option));
@@ -2406,7 +2414,7 @@ index 690981b..f6504a2 100644
         coproc * B8 | (option & 255));
  }
  
-@@ -2470,7 +2302,8 @@ void Assembler::vldr(const DwVfpRegister dst, const Register base, int offset,
+@@ -2470,7 +2310,8 @@ void Assembler::vldr(const DwVfpRegister dst, const Register base, int offset,
  
    DCHECK_GE(offset, 0);
    if ((offset % 4) == 0 && (offset / 4) < 256) {
@@ -2416,7 +2424,7 @@ index 690981b..f6504a2 100644
           vd * B12 | 0xB * B8 | ((offset / 4) & 255));
    } else {
      UseScratchRegisterScope temps(this);
-@@ -2483,7 +2316,8 @@ void Assembler::vldr(const DwVfpRegister dst, const Register base, int offset,
+@@ -2483,7 +2324,8 @@ void Assembler::vldr(const DwVfpRegister dst, const Register base, int offset,
      } else {
        sub(scratch, base, Operand(offset));
      }
@@ -2426,7 +2434,7 @@ index 690981b..f6504a2 100644
           0xB * B8);
    }
  }
-@@ -2519,7 +2353,8 @@ void Assembler::vldr(const SwVfpRegister dst, const Register base, int offset,
+@@ -2519,7 +2361,8 @@ void Assembler::vldr(const SwVfpRegister dst, const Register base, int offset,
    DCHECK_GE(offset, 0);
  
    if ((offset % 4) == 0 && (offset / 4) < 256) {
@@ -2436,7 +2444,7 @@ index 690981b..f6504a2 100644
           0xA * B8 | ((offset / 4) & 255));
    } else {
      // Larger offsets must be handled by computing the correct address in a
-@@ -2532,7 +2367,8 @@ void Assembler::vldr(const SwVfpRegister dst, const Register base, int offset,
+@@ -2532,7 +2375,8 @@ void Assembler::vldr(const SwVfpRegister dst, const Register base, int offset,
      } else {
        sub(scratch, base, Operand(offset));
      }
@@ -2446,7 +2454,7 @@ index 690981b..f6504a2 100644
           0xA * B8);
    }
  }
-@@ -2569,7 +2405,8 @@ void Assembler::vstr(const DwVfpRegister src, const Register base, int offset,
+@@ -2569,7 +2413,8 @@ void Assembler::vstr(const DwVfpRegister src, const Register base, int offset,
    src.split_code(&vd, &d);
  
    if ((offset % 4) == 0 && (offset / 4) < 256) {
@@ -2456,7 +2464,7 @@ index 690981b..f6504a2 100644
           0xB * B8 | ((offset / 4) & 255));
    } else {
      // Larger offsets must be handled by computing the correct address in the a
-@@ -2582,7 +2419,8 @@ void Assembler::vstr(const DwVfpRegister src, const Register base, int offset,
+@@ -2582,7 +2427,8 @@ void Assembler::vstr(const DwVfpRegister src, const Register base, int offset,
      } else {
        sub(scratch, base, Operand(offset));
      }
@@ -2466,7 +2474,7 @@ index 690981b..f6504a2 100644
           0xB * B8);
    }
  }
-@@ -2618,7 +2456,8 @@ void Assembler::vstr(const SwVfpRegister src, const Register base, int offset,
+@@ -2618,7 +2464,8 @@ void Assembler::vstr(const SwVfpRegister src, const Register base, int offset,
    src.split_code(&sd, &d);
    DCHECK_GE(offset, 0);
    if ((offset % 4) == 0 && (offset / 4) < 256) {
@@ -2476,7 +2484,7 @@ index 690981b..f6504a2 100644
           0xA * B8 | ((offset / 4) & 255));
    } else {
      // Larger offsets must be handled by computing the correct address in a
-@@ -2631,7 +2470,8 @@ void Assembler::vstr(const SwVfpRegister src, const Register base, int offset,
+@@ -2631,7 +2478,8 @@ void Assembler::vstr(const SwVfpRegister src, const Register base, int offset,
      } else {
        sub(scratch, base, Operand(offset));
      }
@@ -2486,7 +2494,7 @@ index 690981b..f6504a2 100644
           0xA * B8);
    }
  }
-@@ -2664,7 +2504,8 @@ void Assembler::vldm(BlockAddrMode am, Register base, DwVfpRegister first,
+@@ -2664,7 +2512,8 @@ void Assembler::vldm(BlockAddrMode am, Register base, DwVfpRegister first,
    first.split_code(&sd, &d);
    int count = last.code() - first.code() + 1;
    DCHECK_LE(count, 16);
@@ -2496,7 +2504,7 @@ index 690981b..f6504a2 100644
         0xB * B8 | count * 2);
  }
  
-@@ -2682,7 +2523,8 @@ void Assembler::vstm(BlockAddrMode am, Register base, DwVfpRegister first,
+@@ -2682,7 +2531,8 @@ void Assembler::vstm(BlockAddrMode am, Register base, DwVfpRegister first,
    first.split_code(&sd, &d);
    int count = last.code() - first.code() + 1;
    DCHECK_LE(count, 16);
@@ -2506,7 +2514,7 @@ index 690981b..f6504a2 100644
         0xB * B8 | count * 2);
  }
  
-@@ -2698,7 +2540,8 @@ void Assembler::vldm(BlockAddrMode am, Register base, SwVfpRegister first,
+@@ -2698,7 +2548,8 @@ void Assembler::vldm(BlockAddrMode am, Register base, SwVfpRegister first,
    int sd, d;
    first.split_code(&sd, &d);
    int count = last.code() - first.code() + 1;
@@ -2516,7 +2524,7 @@ index 690981b..f6504a2 100644
         0xA * B8 | count);
  }
  
-@@ -2714,7 +2557,8 @@ void Assembler::vstm(BlockAddrMode am, Register base, SwVfpRegister first,
+@@ -2714,7 +2565,8 @@ void Assembler::vstm(BlockAddrMode am, Register base, SwVfpRegister first,
    int sd, d;
    first.split_code(&sd, &d);
    int count = last.code() - first.code() + 1;
@@ -2526,7 +2534,7 @@ index 690981b..f6504a2 100644
         0xA * B8 | count);
  }
  
-@@ -2727,7 +2571,7 @@ static void DoubleAsTwoUInt32(base::Double d, uint32_t* lo, uint32_t* hi) {
+@@ -2727,7 +2579,7 @@ static void DoubleAsTwoUInt32(base::Double d, uint32_t* lo, uint32_t* hi) {
  
  static void WriteVmovIntImmEncoding(uint8_t imm, uint32_t* encoding) {
    // Integer promotion from uint8_t to int makes these all okay.
@@ -2535,7 +2543,7 @@ index 690981b..f6504a2 100644
    *encoding |= ((imm & 0x70) << (16 - 4));  // bcd
    *encoding |= (imm & 0x0f);                //  efgh
  }
-@@ -2764,7 +2608,7 @@ void Assembler::vmov(const DwVfpRegister dst, uint64_t imm) {
+@@ -2764,7 +2616,7 @@ void Assembler::vmov(const DwVfpRegister dst, uint64_t imm) {
      // | 0(7) | 0(6) | op(5) | 4(1) | imm4(3-0)
      int vd, d;
      dst.split_code(&vd, &d);
@@ -2544,7 +2552,7 @@ index 690981b..f6504a2 100644
           op * B5 | 0x1 * B4 | enc);
    } else {
      UNIMPLEMENTED();
-@@ -2782,7 +2626,7 @@ void Assembler::vmov(const QwNeonRegister dst, uint64_t imm) {
+@@ -2782,7 +2634,7 @@ void Assembler::vmov(const QwNeonRegister dst, uint64_t imm) {
      // | 0(7) | Q(6) | op(5) | 4(1) | imm4(3-0)
      int vd, d;
      dst.split_code(&vd, &d);
@@ -2553,7 +2561,7 @@ index 690981b..f6504a2 100644
           0x1 * B6 | op * B5 | 0x1 * B4 | enc);
    } else {
      UNIMPLEMENTED();
-@@ -2915,7 +2759,8 @@ void Assembler::vmov(const SwVfpRegister dst, const SwVfpRegister src,
+@@ -2915,7 +2767,8 @@ void Assembler::vmov(const SwVfpRegister dst, const SwVfpRegister src,
    int sd, d, sm, m;
    dst.split_code(&sd, &d);
    src.split_code(&sm, &m);
@@ -2563,7 +2571,7 @@ index 690981b..f6504a2 100644
         m * B5 | sm);
  }
  
-@@ -2931,7 +2776,8 @@ void Assembler::vmov(const DwVfpRegister dst, const DwVfpRegister src,
+@@ -2931,7 +2784,8 @@ void Assembler::vmov(const DwVfpRegister dst, const DwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2573,7 +2581,7 @@ index 690981b..f6504a2 100644
         m * B5 | vm);
  }
  
-@@ -2945,7 +2791,8 @@ void Assembler::vmov(const DwVfpRegister dst, const Register src1,
+@@ -2945,7 +2799,8 @@ void Assembler::vmov(const DwVfpRegister dst, const Register src1,
    DCHECK(src1 != pc && src2 != pc);
    int vm, m;
    dst.split_code(&vm, &m);
@@ -2583,7 +2591,7 @@ index 690981b..f6504a2 100644
         0xB * B8 | m * B5 | B4 | vm);
  }
  
-@@ -2959,7 +2806,8 @@ void Assembler::vmov(const Register dst1, const Register dst2,
+@@ -2959,7 +2814,8 @@ void Assembler::vmov(const Register dst1, const Register dst2,
    DCHECK(dst1 != pc && dst2 != pc);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2593,7 +2601,7 @@ index 690981b..f6504a2 100644
         0xB * B8 | m * B5 | B4 | vm);
  }
  
-@@ -2972,7 +2820,8 @@ void Assembler::vmov(const SwVfpRegister dst, const Register src,
+@@ -2972,7 +2828,8 @@ void Assembler::vmov(const SwVfpRegister dst, const Register src,
    DCHECK(src != pc);
    int sn, n;
    dst.split_code(&sn, &n);
@@ -2603,7 +2611,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::vmov(const Register dst, const SwVfpRegister src,
-@@ -2984,7 +2833,8 @@ void Assembler::vmov(const Register dst, const SwVfpRegister src,
+@@ -2984,7 +2841,8 @@ void Assembler::vmov(const Register dst, const SwVfpRegister src,
    DCHECK(dst != pc);
    int sn, n;
    src.split_code(&sn, &n);
@@ -2613,7 +2621,7 @@ index 690981b..f6504a2 100644
         n * B7 | B4);
  }
  
-@@ -3085,57 +2935,67 @@ static Instr EncodeVCVT(const VFPType dst_type, const int dst_code,
+@@ -3085,57 +2943,67 @@ static Instr EncodeVCVT(const VFPType dst_type, const int dst_code,
  void Assembler::vcvt_f64_s32(const DwVfpRegister dst, const SwVfpRegister src,
                               VFPConversionMode mode, const Condition cond) {
    DCHECK(VfpRegisterIsAvailable(dst));
@@ -2691,7 +2699,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::vcvt_f64_s32(const DwVfpRegister dst, int fraction_bits,
-@@ -3151,7 +3011,8 @@ void Assembler::vcvt_f64_s32(const DwVfpRegister dst, int fraction_bits,
+@@ -3151,7 +3019,8 @@ void Assembler::vcvt_f64_s32(const DwVfpRegister dst, int fraction_bits,
    int imm5 = 32 - fraction_bits;
    int i = imm5 & 1;
    int imm4 = (imm5 >> 1) & 0xF;
@@ -2701,7 +2709,7 @@ index 690981b..f6504a2 100644
         vd * B12 | 0x5 * B9 | B8 | B7 | B6 | i * B5 | imm4);
  }
  
-@@ -3167,7 +3028,8 @@ void Assembler::vneg(const DwVfpRegister dst, const DwVfpRegister src,
+@@ -3167,7 +3036,8 @@ void Assembler::vneg(const DwVfpRegister dst, const DwVfpRegister src,
    int vm, m;
    src.split_code(&vm, &m);
  
@@ -2711,7 +2719,7 @@ index 690981b..f6504a2 100644
         B8 | B6 | m * B5 | vm);
  }
  
-@@ -3181,7 +3043,8 @@ void Assembler::vneg(const SwVfpRegister dst, const SwVfpRegister src,
+@@ -3181,7 +3051,8 @@ void Assembler::vneg(const SwVfpRegister dst, const SwVfpRegister src,
    int vm, m;
    src.split_code(&vm, &m);
  
@@ -2721,7 +2729,7 @@ index 690981b..f6504a2 100644
         B6 | m * B5 | vm);
  }
  
-@@ -3196,7 +3059,8 @@ void Assembler::vabs(const DwVfpRegister dst, const DwVfpRegister src,
+@@ -3196,7 +3067,8 @@ void Assembler::vabs(const DwVfpRegister dst, const DwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2731,7 +2739,7 @@ index 690981b..f6504a2 100644
         B6 | m * B5 | vm);
  }
  
-@@ -3209,7 +3073,8 @@ void Assembler::vabs(const SwVfpRegister dst, const SwVfpRegister src,
+@@ -3209,7 +3081,8 @@ void Assembler::vabs(const SwVfpRegister dst, const SwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2741,7 +2749,7 @@ index 690981b..f6504a2 100644
         m * B5 | vm);
  }
  
-@@ -3229,7 +3094,8 @@ void Assembler::vadd(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3229,7 +3102,8 @@ void Assembler::vadd(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2751,7 +2759,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | n * B7 | m * B5 | vm);
  }
  
-@@ -3246,7 +3112,8 @@ void Assembler::vadd(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3246,7 +3120,8 @@ void Assembler::vadd(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2761,7 +2769,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | n * B7 | m * B5 | vm);
  }
  
-@@ -3266,7 +3133,8 @@ void Assembler::vsub(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3266,7 +3141,8 @@ void Assembler::vsub(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2771,7 +2779,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | n * B7 | B6 | m * B5 | vm);
  }
  
-@@ -3283,7 +3151,8 @@ void Assembler::vsub(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3283,7 +3159,8 @@ void Assembler::vsub(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2781,7 +2789,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | n * B7 | B6 | m * B5 | vm);
  }
  
-@@ -3303,7 +3172,8 @@ void Assembler::vmul(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3303,7 +3180,8 @@ void Assembler::vmul(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2791,7 +2799,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | n * B7 | m * B5 | vm);
  }
  
-@@ -3320,7 +3190,8 @@ void Assembler::vmul(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3320,7 +3198,8 @@ void Assembler::vmul(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2801,7 +2809,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | n * B7 | m * B5 | vm);
  }
  
-@@ -3338,7 +3209,8 @@ void Assembler::vmla(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3338,7 +3217,8 @@ void Assembler::vmla(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2811,7 +2819,7 @@ index 690981b..f6504a2 100644
         n * B7 | m * B5 | vm);
  }
  
-@@ -3353,7 +3225,8 @@ void Assembler::vmla(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3353,7 +3233,8 @@ void Assembler::vmla(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2821,7 +2829,7 @@ index 690981b..f6504a2 100644
         m * B5 | vm);
  }
  
-@@ -3371,7 +3244,8 @@ void Assembler::vmls(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3371,7 +3252,8 @@ void Assembler::vmls(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2831,7 +2839,7 @@ index 690981b..f6504a2 100644
         n * B7 | B6 | m * B5 | vm);
  }
  
-@@ -3386,7 +3260,8 @@ void Assembler::vmls(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3386,7 +3268,8 @@ void Assembler::vmls(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2841,7 +2849,7 @@ index 690981b..f6504a2 100644
         B6 | m * B5 | vm);
  }
  
-@@ -3406,7 +3281,8 @@ void Assembler::vdiv(const DwVfpRegister dst, const DwVfpRegister src1,
+@@ -3406,7 +3289,8 @@ void Assembler::vdiv(const DwVfpRegister dst, const DwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2851,7 +2859,7 @@ index 690981b..f6504a2 100644
         n * B7 | m * B5 | vm);
  }
  
-@@ -3423,7 +3299,8 @@ void Assembler::vdiv(const SwVfpRegister dst, const SwVfpRegister src1,
+@@ -3423,7 +3307,8 @@ void Assembler::vdiv(const SwVfpRegister dst, const SwVfpRegister src1,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2861,7 +2869,7 @@ index 690981b..f6504a2 100644
         m * B5 | vm);
  }
  
-@@ -3439,7 +3316,8 @@ void Assembler::vcmp(const DwVfpRegister src1, const DwVfpRegister src2,
+@@ -3439,7 +3324,8 @@ void Assembler::vcmp(const DwVfpRegister src1, const DwVfpRegister src2,
    src1.split_code(&vd, &d);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2871,7 +2879,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | B6 | m * B5 | vm);
  }
  
-@@ -3453,7 +3331,8 @@ void Assembler::vcmp(const SwVfpRegister src1, const SwVfpRegister src2,
+@@ -3453,7 +3339,8 @@ void Assembler::vcmp(const SwVfpRegister src1, const SwVfpRegister src2,
    src1.split_code(&vd, &d);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -2881,7 +2889,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B6 | m * B5 | vm);
  }
  
-@@ -3467,7 +3346,8 @@ void Assembler::vcmp(const DwVfpRegister src1, const double src2,
+@@ -3467,7 +3354,8 @@ void Assembler::vcmp(const DwVfpRegister src1, const double src2,
    DCHECK_EQ(src2, 0.0);
    int vd, d;
    src1.split_code(&vd, &d);
@@ -2891,7 +2899,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | B6);
  }
  
-@@ -3480,7 +3360,8 @@ void Assembler::vcmp(const SwVfpRegister src1, const float src2,
+@@ -3480,7 +3368,8 @@ void Assembler::vcmp(const SwVfpRegister src1, const float src2,
    DCHECK_EQ(src2, 0.0);
    int vd, d;
    src1.split_code(&vd, &d);
@@ -2901,7 +2909,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B6);
  }
  
-@@ -3623,7 +3504,8 @@ void Assembler::vsqrt(const DwVfpRegister dst, const DwVfpRegister src,
+@@ -3623,7 +3512,8 @@ void Assembler::vsqrt(const DwVfpRegister dst, const DwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2911,7 +2919,7 @@ index 690981b..f6504a2 100644
         B8 | 0x3 * B6 | m * B5 | vm);
  }
  
-@@ -3636,7 +3518,8 @@ void Assembler::vsqrt(const SwVfpRegister dst, const SwVfpRegister src,
+@@ -3636,7 +3526,8 @@ void Assembler::vsqrt(const SwVfpRegister dst, const SwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2921,7 +2929,7 @@ index 690981b..f6504a2 100644
         0x3 * B6 | m * B5 | vm);
  }
  
-@@ -3644,14 +3527,16 @@ void Assembler::vmsr(Register dst, Condition cond) {
+@@ -3644,14 +3535,16 @@ void Assembler::vmsr(Register dst, Condition cond) {
    // Instruction details available in ARM DDI 0406A, A8-652.
    // cond(31-28) | 1110 (27-24) | 1110(23-20)| 0001 (19-16) |
    // Rt(15-12) | 1010 (11-8) | 0(7) | 00 (6-5) | 1(4) | 0000(3-0)
@@ -2940,7 +2948,7 @@ index 690981b..f6504a2 100644
  }
  
  void Assembler::vrinta(const SwVfpRegister dst, const SwVfpRegister src) {
-@@ -3767,7 +3652,8 @@ void Assembler::vrintz(const SwVfpRegister dst, const SwVfpRegister src,
+@@ -3767,7 +3660,8 @@ void Assembler::vrintz(const SwVfpRegister dst, const SwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2950,7 +2958,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B7 | B6 | m * B5 | vm);
  }
  
-@@ -3780,7 +3666,8 @@ void Assembler::vrintz(const DwVfpRegister dst, const DwVfpRegister src,
+@@ -3780,7 +3674,8 @@ void Assembler::vrintz(const DwVfpRegister dst, const DwVfpRegister src,
    dst.split_code(&vd, &d);
    int vm, m;
    src.split_code(&vm, &m);
@@ -2960,7 +2968,7 @@ index 690981b..f6504a2 100644
         0x5 * B9 | B8 | B7 | B6 | m * B5 | vm);
  }
  
-@@ -3794,7 +3681,7 @@ void Assembler::vld1(NeonSize size, const NeonListOperand& dst,
+@@ -3794,7 +3689,7 @@ void Assembler::vld1(NeonSize size, const NeonListOperand& dst,
    DCHECK(IsEnabled(NEON));
    int vd, d;
    dst.base().split_code(&vd, &d);
@@ -2969,7 +2977,7 @@ index 690981b..f6504a2 100644
         vd * B12 | dst.type() * B8 | size * B6 | src.align() * B4 |
         src.rm().code());
  }
-@@ -3816,7 +3703,7 @@ void Assembler::vld1s(NeonSize size, const NeonListOperand& dst, uint8_t index,
+@@ -3816,7 +3711,7 @@ void Assembler::vld1s(NeonSize size, const NeonListOperand& dst, uint8_t index,
    DCHECK(IsEnabled(NEON));
    int vd, d;
    dst.base().split_code(&vd, &d);
@@ -2978,7 +2986,7 @@ index 690981b..f6504a2 100644
         src.rn().code() * B16 | vd * B12 | size * B10 | index_align * B4 |
         src.rm().code());
  }
-@@ -3827,7 +3714,7 @@ void Assembler::vld1r(NeonSize size, const NeonListOperand& dst,
+@@ -3827,7 +3722,7 @@ void Assembler::vld1r(NeonSize size, const NeonListOperand& dst,
    DCHECK(IsEnabled(NEON));
    int vd, d;
    dst.base().split_code(&vd, &d);
@@ -2987,7 +2995,7 @@ index 690981b..f6504a2 100644
         src.rn().code() * B16 | vd * B12 | 0xC * B8 | size * B6 |
         dst.length() * B5 | src.rm().code());
  }
-@@ -3840,7 +3727,7 @@ void Assembler::vst1(NeonSize size, const NeonListOperand& src,
+@@ -3840,7 +3735,7 @@ void Assembler::vst1(NeonSize size, const NeonListOperand& src,
    DCHECK(IsEnabled(NEON));
    int vd, d;
    src.base().split_code(&vd, &d);
@@ -2996,7 +3004,7 @@ index 690981b..f6504a2 100644
         src.type() * B8 | size * B6 | dst.align() * B4 | dst.rm().code());
  }
  
-@@ -3856,7 +3743,7 @@ void Assembler::vst1s(NeonSize size, const NeonListOperand& src, uint8_t index,
+@@ -3856,7 +3751,7 @@ void Assembler::vst1s(NeonSize size, const NeonListOperand& src, uint8_t index,
    uint8_t index_align = index << (size + 1);
    int vd, d;
    src.base().split_code(&vd, &d);
@@ -3005,7 +3013,7 @@ index 690981b..f6504a2 100644
         size * B10 | index_align * B4 | dst.rm().code());
  }
  
-@@ -3871,7 +3758,7 @@ void Assembler::vmovl(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src) {
+@@ -3871,7 +3766,7 @@ void Assembler::vmovl(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src) {
    src.split_code(&vm, &m);
    int U = NeonU(dt);
    int imm3 = 1 << NeonSz(dt);
@@ -3014,7 +3022,7 @@ index 690981b..f6504a2 100644
         0xA * B8 | m * B5 | B4 | vm);
  }
  
-@@ -3889,7 +3776,7 @@ void Assembler::vqmovn(NeonDataType dst_dt, NeonDataType src_dt,
+@@ -3889,7 +3784,7 @@ void Assembler::vqmovn(NeonDataType dst_dt, NeonDataType src_dt,
    int size = NeonSz(dst_dt);
    DCHECK_NE(3, size);
    int op = NeonU(src_dt) ? 0b11 : NeonU(dst_dt) ? 0b01 : 0b10;
@@ -3023,7 +3031,7 @@ index 690981b..f6504a2 100644
         0x2 * B8 | op * B6 | m * B5 | vm);
  }
  
-@@ -3998,7 +3885,7 @@ static Instr EncodeNeonDupOp(NeonSize size, NeonRegType reg_type, int dst_code,
+@@ -3998,7 +3893,7 @@ static Instr EncodeNeonDupOp(NeonSize size, NeonRegType reg_type, int dst_code,
    int vm, m;
    src.split_code(&vm, &m);
  
@@ -3032,7 +3040,7 @@ index 690981b..f6504a2 100644
           0x18 * B7 | qbit | m * B5 | vm;
  }
  
-@@ -4036,7 +3923,7 @@ static Instr EncodeNeonVCVT(VFPType dst_type, QwNeonRegister dst,
+@@ -4036,7 +3931,7 @@ static Instr EncodeNeonVCVT(VFPType dst_type, QwNeonRegister dst,
      op = src_type == U32 ? 1 : 0;
    }
  
@@ -3041,7 +3049,7 @@ index 690981b..f6504a2 100644
           B6 | m * B5 | vm;
  }
  
-@@ -4191,7 +4078,7 @@ static Instr EncodeNeonUnaryOp(UnaryOp op, NeonRegType reg_type, NeonSize size,
+@@ -4191,7 +4086,7 @@ static Instr EncodeNeonUnaryOp(UnaryOp op, NeonRegType reg_type, NeonSize size,
    int vm, m;
    NeonSplitCode(reg_type, src_code, &vm, &m, &op_encoding);
  
@@ -3050,7 +3058,7 @@ index 690981b..f6504a2 100644
           vm | op_encoding;
  }
  
-@@ -4256,16 +4143,16 @@ static Instr EncodeNeonBinaryBitwiseOp(BinaryBitwiseOp op, NeonRegType reg_type,
+@@ -4256,16 +4151,16 @@ static Instr EncodeNeonBinaryBitwiseOp(BinaryBitwiseOp op, NeonRegType reg_type,
        op_encoding = 0x1 * B20;
        break;
      case VBIF:
@@ -3071,7 +3079,7 @@ index 690981b..f6504a2 100644
        break;
      case VORR:
        op_encoding = 0x2 * B20;
-@@ -4286,7 +4173,7 @@ static Instr EncodeNeonBinaryBitwiseOp(BinaryBitwiseOp op, NeonRegType reg_type,
+@@ -4286,7 +4181,7 @@ static Instr EncodeNeonBinaryBitwiseOp(BinaryBitwiseOp op, NeonRegType reg_type,
    int vm, m;
    NeonSplitCode(reg_type, src_code2, &vm, &m, &op_encoding);
  
@@ -3080,7 +3088,7 @@ index 690981b..f6504a2 100644
           n * B7 | m * B5 | B4 | vm;
  }
  
-@@ -4377,7 +4264,7 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
+@@ -4377,7 +4272,7 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
        op_encoding = B21 | 0xD * B8;
        break;
      case VMULF:
@@ -3089,7 +3097,7 @@ index 690981b..f6504a2 100644
        break;
      case VMINF:
        op_encoding = B21 | 0xF * B8;
-@@ -4395,10 +4282,10 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
+@@ -4395,10 +4290,10 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
        op_encoding = 0xE * B8;
        break;
      case VCGEF:
@@ -3102,7 +3110,7 @@ index 690981b..f6504a2 100644
        break;
      default:
        UNREACHABLE();
-@@ -4409,7 +4296,7 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
+@@ -4409,7 +4304,7 @@ static Instr EncodeNeonBinOp(FPBinOp op, QwNeonRegister dst,
    src1.split_code(&vn, &n);
    int vm, m;
    src2.split_code(&vm, &m);
@@ -3111,7 +3119,7 @@ index 690981b..f6504a2 100644
           vm | op_encoding;
  }
  
-@@ -4441,7 +4328,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
+@@ -4441,7 +4336,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
        op_encoding = B4;
        break;
      case VSUB:
@@ -3120,7 +3128,7 @@ index 690981b..f6504a2 100644
        break;
      case VQSUB:
        op_encoding = 0x2 * B8 | B4;
-@@ -4459,7 +4346,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
+@@ -4459,7 +4354,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
        op_encoding = 0x8 * B8 | B4;
        break;
      case VCEQ:
@@ -3129,7 +3137,7 @@ index 690981b..f6504a2 100644
        break;
      case VCGE:
        op_encoding = 0x3 * B8 | B4;
-@@ -4471,7 +4358,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
+@@ -4471,7 +4366,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
        op_encoding = B8;
        break;
      case VQRDMULH:
@@ -3138,7 +3146,7 @@ index 690981b..f6504a2 100644
        break;
      default:
        UNREACHABLE();
-@@ -4484,7 +4371,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
+@@ -4484,7 +4379,7 @@ static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
    src2.split_code(&vm, &m);
    int size = NeonSz(dt);
    int u = NeonU(dt);
@@ -3147,7 +3155,7 @@ index 690981b..f6504a2 100644
           n * B7 | B6 | m * B5 | vm | op_encoding;
  }
  
-@@ -4560,7 +4447,7 @@ void Assembler::vmlal(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
+@@ -4560,7 +4455,7 @@ void Assembler::vmlal(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
    int u = NeonU(dt);
    if (!u) UNIMPLEMENTED();
    DCHECK_NE(size, 3);  // SEE "Related encodings"
@@ -3156,7 +3164,7 @@ index 690981b..f6504a2 100644
         vd * B12 | 0x8 * B8 | n * B7 | m * B5 | vm);
  }
  
-@@ -4593,7 +4480,7 @@ void Assembler::vmull(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
+@@ -4593,7 +4488,7 @@ void Assembler::vmull(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
    src2.split_code(&vm, &m);
    int size = NeonSz(dt);
    int u = NeonU(dt);
@@ -3165,7 +3173,7 @@ index 690981b..f6504a2 100644
         vd * B12 | 0xC * B8 | n * B7 | m * B5 | vm);
  }
  
-@@ -4645,7 +4532,7 @@ static Instr EncodeNeonShiftRegisterOp(NeonShiftOp op, NeonDataType dt,
+@@ -4645,7 +4540,7 @@ static Instr EncodeNeonShiftRegisterOp(NeonShiftOp op, NeonDataType dt,
    int size = NeonSz(dt);
    int u = NeonU(dt);
  
@@ -3174,7 +3182,7 @@ index 690981b..f6504a2 100644
           0x4 * B8 | n * B7 | m * B5 | vm | op_encoding;
  }
  
-@@ -4664,26 +4551,26 @@ static Instr EncodeNeonShiftOp(NeonShiftOp op, NeonSize size, bool is_unsigned,
+@@ -4664,26 +4559,26 @@ static Instr EncodeNeonShiftOp(NeonShiftOp op, NeonSize size, bool is_unsigned,
      case VSHR: {
        DCHECK(shift > 0 && size_in_bits >= shift);
        imm6 = 2 * size_in_bits - shift;
@@ -3205,7 +3213,7 @@ index 690981b..f6504a2 100644
        break;
      }
      default:
-@@ -4698,7 +4585,7 @@ static Instr EncodeNeonShiftOp(NeonShiftOp op, NeonSize size, bool is_unsigned,
+@@ -4698,7 +4593,7 @@ static Instr EncodeNeonShiftOp(NeonShiftOp op, NeonSize size, bool is_unsigned,
    int vm, m;
    NeonSplitCode(reg_type, src_code, &vm, &m, &op_encoding);
  
@@ -3214,7 +3222,7 @@ index 690981b..f6504a2 100644
           vm | op_encoding;
  }
  
-@@ -4822,7 +4709,7 @@ static Instr EncodeNeonPairwiseOp(NeonPairwiseOp op, NeonDataType dt,
+@@ -4822,7 +4717,7 @@ static Instr EncodeNeonPairwiseOp(NeonPairwiseOp op, NeonDataType dt,
    src2.split_code(&vm, &m);
    int size = NeonSz(dt);
    int u = NeonU(dt);
@@ -3223,7 +3231,7 @@ index 690981b..f6504a2 100644
           n * B7 | m * B5 | vm | op_encoding;
  }
  
-@@ -4838,7 +4725,7 @@ void Assembler::vpadd(DwVfpRegister dst, DwVfpRegister src1,
+@@ -4838,7 +4733,7 @@ void Assembler::vpadd(DwVfpRegister dst, DwVfpRegister src1,
    int vm, m;
    src2.split_code(&vm, &m);
  
@@ -3232,7 +3240,7 @@ index 690981b..f6504a2 100644
         m * B5 | vm);
  }
  
-@@ -4992,7 +4879,7 @@ void Assembler::vext(QwNeonRegister dst, QwNeonRegister src1,
+@@ -4992,7 +4887,7 @@ void Assembler::vext(QwNeonRegister dst, QwNeonRegister src1,
    int vm, m;
    src2.split_code(&vm, &m);
    DCHECK_GT(16, bytes);
@@ -3241,7 +3249,7 @@ index 690981b..f6504a2 100644
         n * B7 | B6 | m * B5 | vm);
  }
  
-@@ -5111,7 +4998,7 @@ static Instr EncodeNeonVTB(DwVfpRegister dst, const NeonListOperand& list,
+@@ -5111,7 +5006,7 @@ static Instr EncodeNeonVTB(DwVfpRegister dst, const NeonListOperand& list,
    int vm, m;
    index.split_code(&vm, &m);
    int op = vtbx ? 1 : 0;  // vtbl = 0, vtbx = 1.
@@ -3250,7 +3258,7 @@ index 690981b..f6504a2 100644
           list.length() * B8 | n * B7 | op * B6 | m * B5 | vm;
  }
  
-@@ -5127,40 +5014,36 @@ void Assembler::vtbx(DwVfpRegister dst, const NeonListOperand& list,
+@@ -5127,40 +5022,36 @@ void Assembler::vtbx(DwVfpRegister dst, const NeonListOperand& list,
    emit(EncodeNeonVTB(dst, list, index, true));
  }
  
@@ -3307,7 +3315,7 @@ index 690981b..f6504a2 100644
  }
  
  Instr Assembler::PatchMovwImmediate(Instr instruction, uint32_t immediate) {
-@@ -5168,44 +5051,21 @@ Instr Assembler::PatchMovwImmediate(Instr instruction, uint32_t immediate) {
+@@ -5168,44 +5059,21 @@ Instr Assembler::PatchMovwImmediate(Instr instruction, uint32_t immediate) {
    return instruction | EncodeMovwImmediate(immediate);
  }
  
@@ -3359,7 +3367,7 @@ index 690981b..f6504a2 100644
  }
  
  // Debugging.
-@@ -5468,7 +5328,7 @@ void Assembler::CheckConstPool(bool force_emit, bool require_jump) {
+@@ -5468,7 +5336,7 @@ void Assembler::CheckConstPool(bool force_emit, bool require_jump) {
        instr_at_put(entry.position(),
                     SetLdrRegisterImmediateOffset(instr, delta));
        if (!entry.is_merged()) {
@@ -3368,7 +3376,7 @@ index 690981b..f6504a2 100644
        }
      }
  
-@@ -5504,7 +5364,7 @@ PatchingAssembler::~PatchingAssembler() {
+@@ -5504,7 +5372,7 @@ PatchingAssembler::~PatchingAssembler() {
    DCHECK_EQ(reloc_info_writer.pos(), buffer_start_ + buffer_->size());
  }
  

@@ -13,6 +13,9 @@ run there, not even jitless. this is the v8 part of the thumb-2 build of
 - on my surface rt (tegra 3, windows rt 8.1): 698 of the 700 mjsunit runs of my device kit passed, and the 2 failures
   are fixed now (re-run: 21/21). all 25 js perf suites run. the browser does speedometer 3.1 at 1.18 with the sandbox on
 - not tested yet: windows rt 8.0 on a device (i checked against 8.0's system dlls offline) and windows 10 15035
+- qualcomm cpus (lumia 2520, lumia 735): v1.3 crashed at start there, because the deoptimizer entry stored pc. `str pc`
+  is unpredictable in thumb-2: the tegra runs it, qualcomm chips trap it. fixed in v1.3.1, not tested on those yet (i
+  don't have them)
 
 ## what's here
 
