@@ -30,10 +30,33 @@ Reports go to F:\\cr\\thumb2\\runs\\<mode>-<time>.md (stdout gets the summary on
 """
 import argparse, bisect, difflib, glob, hashlib, importlib.util, json, os, re, shutil, sys, time
 
-ROOT = r"D:\cr\rt8\src"
+# 2026-11-08: the port tree D:\cr\rt8\src was deleted in the 11-03 cleanup (its V8 was identical to t2src's port files),
+# so the runner edits the browser tree itself. Most t2src files are HARD LINKS shared with the release tree F:\cr\src:
+# every write goes through write_detached() (temp file + rename = a new file), never in place.
+ROOT = r"F:\cr\t2src"
 PRISTINE_SRC = r"F:\cr\src"
 WORK = r"F:\cr\thumb2"
 RULES_DIR = os.path.join(WORK, "rules")
+
+
+def write_detached(path, data, newline=""):
+    """Write a tree file as a NEW file (temp + os.replace): a t2src file that is a hard link into F:\\cr\\src gets
+    its own copy and the release tree is never written. Refuses any path outside ROOT."""
+    full = os.path.abspath(path)
+    if not full.lower().startswith(os.path.abspath(ROOT).lower() + os.sep):
+        raise SystemExit(f"refusing to write outside {ROOT}: {path}")
+    rel = os.path.relpath(full, ROOT)
+    twin = os.path.join(PRISTINE_SRC, rel)
+    twin_sha = hashlib.sha256(open(twin, "rb").read()).hexdigest() if os.path.exists(twin) else None
+    tmp = full + ".t2run-tmp"
+    with open(tmp, "w", encoding="utf-8", newline=newline) as f:
+        f.write(data)
+    os.replace(tmp, full)
+    if twin_sha is not None:
+        if os.path.samefile(full, twin):
+            raise SystemExit(f"{rel}: still the same file as the release tree after the write")
+        if hashlib.sha256(open(twin, "rb").read()).hexdigest() != twin_sha:
+            raise SystemExit(f"{rel}: THE RELEASE TREE COPY CHANGED")
 RUNS_DIR = os.path.join(WORK, "runs")
 PRISTINE_DIR = os.path.join(WORK, "pristine")
 MAP_JSON = os.path.join(WORK, "map", "fulljit-map.json")
@@ -344,8 +367,7 @@ class Source:
             raise SystemExit(f"refusing to write {self.rel}: mixed line endings")
         keep_pristine(self.rel)
         data = self.text.replace("\n", "\r\n") if self.eol == "\r\n" else self.text
-        with open(self.path, "w", encoding="utf-8", newline="") as f:
-            f.write(data)
+        write_detached(self.path, data)
 
 
 _TOK = re.compile(r'//[^\n]*|/\*.*?\*/|(?<!\w)R"([^(\s"]{0,16})\(.*?\)\1"|"(?:\\.|[^"\\\n])*"|'
@@ -832,7 +854,7 @@ def main():
             if not os.path.exists(p):
                 print(f"{rel}: no pristine copy (never written by t2run)")
                 continue
-            shutil.copyfile(p, os.path.join(ROOT, rel))
+            write_detached(os.path.join(ROOT, rel), open(p, encoding="utf-8", newline="").read())
             print(f"restored {rel}")
         return
 
@@ -870,8 +892,7 @@ def main():
                     if cur is None and not os.path.exists(marker):
                         os.makedirs(os.path.dirname(marker), exist_ok=True)
                         open(marker, "w").close()
-                    with open(path, "w", encoding="utf-8", newline="") as f:
-                        f.write(new.replace("\n", "\r\n"))
+                    write_detached(path, new.replace("\n", "\r\n"))
                     j.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "file": rel, "rules": ["new file"],
                                         "sha_after": hashlib.sha256(new.encode()).hexdigest()[:16]}) + "\n")
             rep(f"WROTE {len(changed) + len(_new_files)} file(s)")

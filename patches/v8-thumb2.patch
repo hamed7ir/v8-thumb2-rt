@@ -3,7 +3,7 @@ For V8 15.0.245.28 (Chromium 150.0.7871.226, v8 revision 17700469f857c3aaf7e2803
 From the V8 root:      git -c core.autocrlf=false apply v8-thumb2.patch
 From a Chromium src:   git -c core.autocrlf=false apply --directory=v8 v8-thumb2.patch
 This file is the result of the rules in port/rules applied by port/tools/t2run.py (decisions in port/DESIGN.md), byte
-for byte the V8 tree of the Venetium v1.3.1 Thumb-2 build. 41 files (one new: src/codegen/arm/t32-encodings-arm.h).
+for byte the V8 tree of the Venetium v1.3.2 Thumb-2 build. 42 files (one new: src/codegen/arm/t32-encodings-arm.h).
 
 diff --git a/src/api/api.cc b/src/api/api.cc
 index 92690e5..eb9ecac 100644
@@ -3676,7 +3676,7 @@ index 11a1c96..e4aba7e 100644
  // The maximum size of the stack restore after a fast API call that pops the
  // stack parameters of the call off the stack.
 diff --git a/src/codegen/arm/macro-assembler-arm.cc b/src/codegen/arm/macro-assembler-arm.cc
-index eac08b5..1ae19dd 100644
+index eac08b5..4a331da 100644
 --- a/src/codegen/arm/macro-assembler-arm.cc
 +++ b/src/codegen/arm/macro-assembler-arm.cc
 @@ -207,7 +207,7 @@ void MacroAssembler::Jump(Handle<Code> code, RelocInfo::Mode rmode,
@@ -3711,7 +3711,43 @@ index eac08b5..1ae19dd 100644
    str(lr, MemOperand(sp));
    Call(target);
  }
-@@ -1988,9 +1988,11 @@ void MacroAssembler::TryInlineTruncateDoubleToI(Register result,
+@@ -1351,7 +1351,10 @@ void MacroAssembler::LslPair(Register dst_low, Register dst_high,
+   bind(&less_than_32);
+   // If shift < 32
+   lsl(dst_high, src_high, Operand(shift));
+-  orr(dst_high, dst_high, Operand(src_low, LSR, scratch));
++  // T32 has no register-shifted-register orr; its emulation would need a
++  // second scratch register while this one is held: shift into it first.
++  lsr(scratch, src_low, Operand(scratch));
++  orr(dst_high, dst_high, Operand(scratch));
+   lsl(dst_low, src_low, Operand(shift));
+   bind(&done);
+ }
+@@ -1400,7 +1403,10 @@ void MacroAssembler::LsrPair(Register dst_low, Register dst_high,
+   // If shift < 32
+ 
+   lsr(dst_low, src_low, Operand(shift));
+-  orr(dst_low, dst_low, Operand(src_high, LSL, scratch));
++  // T32 has no register-shifted-register orr; its emulation would need a
++  // second scratch register while this one is held: shift into it first.
++  lsl(scratch, src_high, Operand(scratch));
++  orr(dst_low, dst_low, Operand(scratch));
+   lsr(dst_high, src_high, Operand(shift));
+   bind(&done);
+ }
+@@ -1448,7 +1454,10 @@ void MacroAssembler::AsrPair(Register dst_low, Register dst_high,
+   bind(&less_than_32);
+   // If shift < 32
+   lsr(dst_low, src_low, Operand(shift));
+-  orr(dst_low, dst_low, Operand(src_high, LSL, scratch));
++  // T32 has no register-shifted-register orr; its emulation would need a
++  // second scratch register while this one is held: shift into it first.
++  lsl(scratch, src_high, Operand(scratch));
++  orr(dst_low, dst_low, Operand(scratch));
+   asr(dst_high, src_high, Operand(shift));
+   bind(&done);
+ }
+@@ -1988,9 +1997,11 @@ void MacroAssembler::TryInlineTruncateDoubleToI(Register result,
  
    Register scratch = temps.Acquire();
    // If result is not saturated (0x7FFFFFFF or 0x80000000), we are done.
@@ -3725,7 +3761,7 @@ index eac08b5..1ae19dd 100644
  }
  
  void MacroAssembler::TruncateDoubleToI(Isolate* isolate, Zone* zone,
-@@ -2686,7 +2688,14 @@ void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
+@@ -2686,7 +2697,14 @@ void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
      // and the original value of sp.
      mov(scratch, sp);
      AllocateStackSpace((stack_passed_arguments + 1) * kPointerSize);
@@ -3741,7 +3777,7 @@ index eac08b5..1ae19dd 100644
      str(scratch, MemOperand(sp, stack_passed_arguments * kPointerSize));
    } else if (stack_passed_arguments > 0) {
      AllocateStackSpace(stack_passed_arguments * kPointerSize);
-@@ -2908,14 +2917,16 @@ void MacroAssembler::PreCheckSkippedWriteBarrier(Register object,
+@@ -2908,14 +2926,16 @@ void MacroAssembler::PreCheckSkippedWriteBarrier(Register object,
  
  void MacroAssembler::ComputeCodeStartAddress(Register dst) {
    ASM_CODE_COMMENT(this);
@@ -3761,7 +3797,7 @@ index eac08b5..1ae19dd 100644
    ldr(scratch, MemOperand(kJavaScriptCallCodeStartRegister, offset));
    ldr(scratch, FieldMemOperand(scratch, Code::kFlagsOffset));
    tst(scratch, Operand(1 << Code::kMarkedForDeoptimizationBit));
-@@ -3071,9 +3082,18 @@ void MacroAssembler::Switch(Register scratch, Register value,
+@@ -3071,9 +3091,18 @@ void MacroAssembler::Switch(Register scratch, Register value,
    cmp(value, Operand(num_labels));
    // Ensure to emit the constant pool first if necessary.
    CheckConstPool(true, true);
@@ -4747,6 +4783,84 @@ index 6dfc9cd..7200021 100644
                code->instruction_size());
          }
        });
+diff --git a/src/wasm/baseline/arm/liftoff-assembler-arm-inl.h b/src/wasm/baseline/arm/liftoff-assembler-arm-inl.h
+index dbcd436..0af7525 100644
+--- a/src/wasm/baseline/arm/liftoff-assembler-arm-inl.h
++++ b/src/wasm/baseline/arm/liftoff-assembler-arm-inl.h
+@@ -943,25 +943,32 @@ void LiftoffAssembler::StoreTaggedPointer(
+     LiftoffRegList pinned, uint32_t* trapping_store_pc,
+     compiler::WriteBarrierKind write_barrier) {
+   static_assert(kTaggedSize == kInt32Size);
+-  UseScratchRegisterScope temps{this};
+   Register actual_offset_reg = offset_reg;
+-  if (offset_reg != no_reg && offset_imm != 0) {
+-    if (cache_state()->is_used(LiftoffRegister(offset_reg))) {
+-      // The code below only needs a scratch register if the {MemOperand} given
+-      // to {str} has an offset outside the uint12 range. After doing the
+-      // addition below we will not pass an immediate offset to {str} though, so
+-      // we can use the scratch register here.
+-      actual_offset_reg = temps.Acquire();
++  // T32: ip is held for the store only. The write barrier below needs it free
++  // (CheckPageFlag and C calls take a scratch register of their own), so the
++  // slot offset is formed again there when it lived in ip.
++  bool offset_in_scratch = false;
++  {
++    UseScratchRegisterScope temps{this};
++    if (offset_reg != no_reg && offset_imm != 0) {
++      if (cache_state()->is_used(LiftoffRegister(offset_reg))) {
++        // The code below only needs a scratch register if the {MemOperand}
++        // given to {str} has an offset outside the uint12 range. After doing
++        // the addition below we will not pass an immediate offset to {str}
++        // though, so we can use the scratch register here.
++        actual_offset_reg = temps.Acquire();
++        offset_in_scratch = true;
++      }
++      add(actual_offset_reg, offset_reg, Operand(offset_imm));
+     }
+-    add(actual_offset_reg, offset_reg, Operand(offset_imm));
+-  }
+-  MemOperand dst_op = actual_offset_reg == no_reg
+-                          ? MemOperand(dst_addr, offset_imm)
+-                          : MemOperand(dst_addr, actual_offset_reg);
++    MemOperand dst_op = actual_offset_reg == no_reg
++                            ? MemOperand(dst_addr, offset_imm)
++                            : MemOperand(dst_addr, actual_offset_reg);
+ 
+-  if (trapping_store_pc) *trapping_store_pc = pc_offset();
++    if (trapping_store_pc) *trapping_store_pc = pc_offset();
+ 
+-  str(src, dst_op);
++    str(src, dst_op);
++  }
+ 
+   if (v8_flags.disable_write_barriers) return;
+ 
+@@ -980,11 +987,20 @@ void LiftoffAssembler::StoreTaggedPointer(
+                 kZero, &exit);
+   CheckPageFlag(src, MemoryChunk::kPointersToHereAreInterestingMask, kZero,
+                 &exit);
+-  CallRecordWriteStubSaveRegisters(
+-      dst_addr,
+-      actual_offset_reg == no_reg ? Operand(offset_imm)
+-                                  : Operand(actual_offset_reg),
+-      SaveFPRegsMode::kSave, StubCallMode::kCallWasmRuntimeStub);
++  if (offset_in_scratch) {
++    UseScratchRegisterScope temps{this};
++    Register slot_offset = temps.Acquire();
++    add(slot_offset, offset_reg, Operand(offset_imm));
++    CallRecordWriteStubSaveRegisters(dst_addr, Operand(slot_offset),
++                                     SaveFPRegsMode::kSave,
++                                     StubCallMode::kCallWasmRuntimeStub);
++  } else {
++    CallRecordWriteStubSaveRegisters(
++        dst_addr,
++        actual_offset_reg == no_reg ? Operand(offset_imm)
++                                    : Operand(actual_offset_reg),
++        SaveFPRegsMode::kSave, StubCallMode::kCallWasmRuntimeStub);
++  }
+   bind(&exit);
+ }
+ 
 diff --git a/src/wasm/jump-table-assembler.cc b/src/wasm/jump-table-assembler.cc
 index 47d21e2..586a3ca 100644
 --- a/src/wasm/jump-table-assembler.cc

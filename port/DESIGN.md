@@ -94,6 +94,14 @@ rule per pattern (below), applied mechanically everywhere it occurs, each replac
    Conditional branches need no IT (B<c>.W); conditional far code targets = IT + B.W.
 5. **Register-shifted-register operands** (`add r0,r1,r2,lsl r3`) have no T32 form (oracle: rejected) -> split with the
    scratch register (`lsl.w ip, r2, r3; add.w r0, r1, ip`).
+   **Scratch budget (v1.3.2):** these splits, and every other T32 emulation that A32 did not need (rd == rn
+   reg-shift, T32-unencodable immediates, sp/pc forms, ld/st offsets below -255 or with negative/shifted register
+   offsets, ldrd/strd offsets not *4), take ip when rd cannot be reused. A caller that already holds ip (the only core
+   scratch) hits CHECK(!is_empty()) in RegList::first(). The v1.3 build crashed so on Telegram Web and Discord (wasm
+   i64 shifts): LslPair/LsrPair/AsrPair held ip and emitted `orr dst, dst, src, lsr ip`. Rule 082 fixes those and
+   Liftoff's StoreTaggedPointer (ip held across its write barrier); a census of every scratch user (TurboFan,
+   Liftoff, Maglev, Sparkplug, regexp, builtins, MacroAssembler helpers) found no other live site. The 10-27
+   mksnapshot census (rule 990) only covers builtins: code that runs only in the JIT tiers needs this kind of review.
 6. **Traps:** `svc #0xffffff` (A32 stop) -> 32-bit `udf.w #imm16` (`udf.w #0` = `0xF7F0A000`) to keep one slot.
 7. **Branch ranges:** `B<c>.W` +-1 MiB, `B.W`/`BL` +-16 MiB -> `kMaxPCRelativeCodeRangeInMB = 16`. Label
    branches with a condition are B<c>.W (a function > 1 MiB with a far conditional branch CHECK-fails); a

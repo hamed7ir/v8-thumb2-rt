@@ -14,8 +14,12 @@ run there, not even jitless. this is the v8 part of the thumb-2 build of
   are fixed now (re-run: 21/21). all 25 js perf suites run. the browser does speedometer 3.1 at 1.18 with the sandbox on
 - not tested yet: windows rt 8.0 on a device (i checked against 8.0's system dlls offline) and windows 10 15035
 - qualcomm cpus (lumia 2520, lumia 735): v1.3 crashed at start there, because the deoptimizer entry stored pc. `str pc`
-  is unpredictable in thumb-2: the tegra runs it, qualcomm chips trap it. fixed in v1.3.1, not tested on those yet (i
-  don't have them)
+  is unpredictable in thumb-2: the tegra runs it, qualcomm chips trap it. fixed in v1.3.1, and it runs on a lumia 735
+  now (thanks aimul). not tested on the 2520
+- v1.3.2: telegram web (a and k) and discord work now. thumb-2 has no "shift by a register" form for orr, add and the
+  others, so the port does the shift in the scratch register first. v8's 64-bit shifts by a variable amount already
+  held that register, so the jit stopped the tab when a site's webassembly used them. fixed (rule 082), together with
+  a rarer liftoff write-barrier path; i checked every other place that takes the scratch register and found no more
 
 ## what's here
 
