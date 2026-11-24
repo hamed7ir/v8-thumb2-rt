@@ -104,8 +104,18 @@ rule per pattern (below), applied mechanically everywhere it occurs, each replac
    mksnapshot census (rule 990) only covers builtins: code that runs only in the JIT tiers needs this kind of review.
 6. **Traps:** `svc #0xffffff` (A32 stop) -> 32-bit `udf.w #imm16` (`udf.w #0` = `0xF7F0A000`) to keep one slot.
 7. **Branch ranges:** `B<c>.W` +-1 MiB, `B.W`/`BL` +-16 MiB -> `kMaxPCRelativeCodeRangeInMB = 16`. Label
-   branches with a condition are B<c>.W (a function > 1 MiB with a far conditional branch CHECK-fails); a
-   conditional code-target jump/call is `it(cond)` + B.W/BL with the reloc on the branch itself.
+   branches with a condition are B<c>.W; a conditional code-target jump/call is `it(cond)` + B.W/BL with the reloc on
+   the branch itself. **Branch islands (rule 083, 2026-11-21):** before it, a function > 1 MiB CHECK-failed on a far
+   conditional branch (JetStream 3's ONNX Runtime wasm has functions of 600-750 KB). Now every forward B<c>.W to an
+   unbound label is tracked by position; when the oldest is 128 KB old, an island (a B.W over it, then one B.W veneer
+   per branch older than 16 KB) goes before the next instruction emitted while the constant pool is not blocked; the
+   veneer takes the branch's place in the label's link chain and bind_to() points the branch at it.
+   CheckVeneerPoolBefore(bytes) runs before the deopt exits and the jump tables (no island can go inside them), and
+   MacroAssembler::Call(Address) checks for an island before it blocks the pool (2026-11-22: a run of calls - Liftoff's
+   out-of-line trap calls, 8 bytes each, in source order - never let one in, so 128,000+ trap sites still crashed). A
+   conditional branch backward more than 960 KB, or forward to a label whose chain head is more than 960 KB back, is
+   IT + B.W. Code whose forward conditional branches all resolve within 128 KB is emitted exactly as before. Limit
+   left: a code object over 16 MiB (a wasm function body over ~4.5 MB under Liftoff) CHECK-fails on a B.W.
 8. **PC reads:** `kPcLoadDelta = 4`; literal/ADR bases are `Align(PC, 4)` = PC because every 32-bit instruction
    is 4-byte aligned. pc as an operand = ADR (addw/subw rd, pc, #imm12) or `adr scratch, #0` first.
 9. **16-bit instructions** always fill one 4-byte unit with a partner: `[nop16|IT][bx/blx/mov pc]` (return

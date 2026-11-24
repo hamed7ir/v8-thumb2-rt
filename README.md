@@ -20,6 +20,10 @@ run there, not even jitless. this is the v8 part of the thumb-2 build of
   others, so the port does the shift in the scratch register first. v8's 64-bit shifts by a variable amount already
   held that register, so the jit stopped the tab when a site's webassembly used them. fixed (rule 082), together with
   a rarer liftoff write-barrier path; i checked every other place that takes the scratch register and found no more
+- v1.4: big webassembly functions work. a thumb-2 conditional branch reaches only +-1 mb, and one big wasm function
+  can make more code than that, so the jit stopped the tab. the port now puts branch islands in the code (rule 083).
+  limit left: one code object over 16 mb. the liftoff write-barrier fix moved into venetium (patch 0071), so the
+  patch no longer has that file
 
 ## what's here
 
